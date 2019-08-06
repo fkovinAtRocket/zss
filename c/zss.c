@@ -67,6 +67,8 @@
 #include "zssLogging.h"
 #include "serviceUtils.h"
 
+#include "jwt/jwt.h"
+
 #define PRODUCT "ZLUX"
 #ifndef PRODUCT_MAJOR_VERSION
 #define PRODUCT_MAJOR_VERSION 0
@@ -560,6 +562,43 @@ static void installWebPluginDefintionsService(WebPluginListElt *webPlugins, Http
   zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG2, "end %s\n", __FUNCTION__);
 }
 
+static int serveJwtTest(HttpService *service, HttpResponse *response){
+  zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG2, "begin %s\n", __FUNCTION__);
+
+  jsonPrinter *const out = respondWithJsonPrinter(response);
+  setResponseStatus(response, 200, "OK");
+  setDefaultJSONRESTHeaders(response);
+  writeHeader(response);
+
+  const Jwt *const jwt = response->request->authToken;
+  jsonStart(out);
+    jsonStartObject(out, "jwtTestServiceResponse");
+      jsonAddString(out, "requestUsername", response->request->username);
+      if (jwt == NULL) {
+        jsonAddBoolean(out, "jwtIsNull", true);
+      } else {
+        jsonAddString(out, "subject", jwt->subject);
+        jsonAddString(out, "issuer", jwt->issuer);
+        jsonAddInt64(out, "expires", jwt->expirationTime);
+      }
+    jsonEndObject(out);
+  jsonEnd(out);
+  finishResponse(response);
+
+  zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG2, "end %s\n", __FUNCTION__);
+  return 0;
+}
+
+static void installJwtTestService(HttpServer *server) {
+  zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG2, "begin %s\n", __FUNCTION__);
+  zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG, "installing jwt test service\n");
+  HttpService *httpService = makeGeneratedService("jwt test service", "/jwt-test");
+  httpService->serviceFunction = serveJwtTest;
+  httpService->authType = SERVICE_AUTH_JWT;
+  registerHttpService(server, httpService);
+  zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG2, "end %s\n", __FUNCTION__);
+}
+
 static WebPluginListElt* readWebPluginDefinitions(HttpServer *server, ShortLivedHeap *slh, char *dirname) {
   int pluginDefinitionCount = 0;
   int returnCode;
@@ -888,6 +927,19 @@ int main(int argc, char **argv){
 
     zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_INFO, "ZSS server settings: address=%s, port=%d\n", address, port);
     server = makeHttpServer2(base,inetAddress,port,requiredTLSFlag,&returnCode,&reasonCode);
+    int initTokenRc, p11rc, p11Rsn;
+    int rc = httpServerInitPkcs11JwtContext(
+        server,
+        "ZOWE.ZSS.JWTKEYS", "KEY_RS256", CKO_PUBLIC_KEY,
+        &initTokenRc, &p11rc, &p11Rsn);
+    if (rc != 0) {
+      zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_WARNING,
+          "server startup problem, could not load the key %s from token %s:"
+            "rc %d, p11rc %d, p11Rsn %d\n",
+          "KEY_RS256", "ZOWE.ZSS.JWTKEYS",
+          initTokenRc, p11rc, p11Rsn);
+      return 8;
+    }
     if (server){
       server->defaultProductURLPrefix = PRODUCT;
       loadWebServerConfig(server, mvdSettings);
@@ -908,6 +960,7 @@ int main(int argc, char **argv){
 #endif
       installLoginService(server);
       installLogoutService(server);
+      installJwtTestService(server);
       printZISStatus(server);
       mainHttpLoop(server);
 
