@@ -61,6 +61,7 @@
 #ifdef __ZOWE_OS_ZOS
 #include "datasetjson.h"
 #include "authService.h"
+#include "securityService.h"
 #include "zis/client.h"
 #endif
 
@@ -956,6 +957,7 @@ int main(int argc, char **argv){
       installDatasetMetadataService(server);
       installDatasetContentsService(server);
       installAuthCheckService(server);
+      installSecurityManagementServices(server);
       installOMVSService(server);
 #endif
       installLoginService(server);
