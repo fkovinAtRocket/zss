@@ -931,7 +931,7 @@ int main(int argc, char **argv){
     int initTokenRc, p11rc, p11Rsn;
     int rc = httpServerInitPkcs11JwtContext(
         server,
-        "ZOWE.ZSS.JWTKEYS", "KEY_RS256", CKO_PUBLIC_KEY,
+        "ZOWE.ZSS.JWTKEYS", "jwtsecret", CKO_PUBLIC_KEY,
         &initTokenRc, &p11rc, &p11Rsn);
     if (rc != 0) {
       zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_WARNING,

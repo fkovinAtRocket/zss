@@ -49,20 +49,3 @@ chmod go-rwx $TMP_KEYSTORE
 echo $TMP_KEYSTORE_PASSWORD |gskkyman -i -t $TOKEN -l jwtsecret -p $TMP_KEYSTORE
 
 >&2 echo "Done"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
