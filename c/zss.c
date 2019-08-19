@@ -590,7 +590,6 @@ static void installJwtTestService(HttpServer *server) {
   zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG, "installing jwt test service\n");
   HttpService *httpService = makeGeneratedService("jwt test service", "/jwt-test");
   httpService->serviceFunction = serveJwtTest;
-  httpService->authType = SERVICE_AUTH_JWT;
   registerHttpService(server, httpService);
   zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_DEBUG2, "end %s\n", __FUNCTION__);
 }
@@ -852,6 +851,76 @@ static int validateFilePermissions(const char *filePath) {
 
 #endif /* ZSS_IGNORE_PERMISSION_PROBLEMS */
 
+int initializeJwtKeystoreIfConfigured(JsonObject *const serverConfig,
+                                      HttpServer *const httpServer) {
+  JsonObject *const agentSettings = jsonObjectGetObject(serverConfig, "agent");
+  if (!agentSettings) {
+    zowelog(NULL,
+        LOG_COMP_ID_MVD_SERVER,
+        ZOWE_LOG_INFO,
+        "Will not accept JWTs: agent configuration missing\n");
+    return 0;
+  }
+
+  JsonObject *const jwtKeystoreSettings = jsonObjectGetObject(agentSettings,
+      "jwtKeystore");
+  if (!jwtKeystoreSettings) {
+    zowelog(NULL,
+        LOG_COMP_ID_MVD_SERVER,
+        ZOWE_LOG_INFO,
+        "Will not accept JWTs: JWT keystore configuration missing\n");
+     return 0;
+  }
+
+  const char *const keystoreType = jsonObjectGetString(jwtKeystoreSettings, "type");
+  const char *const keystoreName = jsonObjectGetString(jwtKeystoreSettings, "name");
+  const char *const keyId = jsonObjectHasKey(jwtKeystoreSettings, "keyId")?
+      jsonObjectGetString(jwtKeystoreSettings, "keyId") : "jwtsecret";
+  const int fallback = jsonObjectGetBoolean(jwtKeystoreSettings, "fallback");
+
+  if (keystoreType != NULL && strcmp(keystoreType, "pkcs11") != 0) {
+    zowelog(NULL,
+        LOG_COMP_ID_MVD_SERVER,
+        ZOWE_LOG_WARNING,
+        "Invalid JWT configuration: unknown keystore type %s\n", keystoreType);
+    return 1;
+  } else if (keystoreName == NULL) {
+    zowelog(NULL,
+       LOG_COMP_ID_MVD_SERVER,
+       ZOWE_LOG_WARNING,
+       "Invalid JWT configuration: keystore name missing\n");
+    return 1;
+  } else {
+    zowelog(NULL,
+       LOG_COMP_ID_MVD_SERVER,
+       ZOWE_LOG_INFO,
+       "JWT using PKCS#11 token '%s', key id '%s', %s fallback to legacy\n",
+       keystoreName,
+       keyId,
+       fallback? "with" : "without");
+  }
+
+
+  int initTokenRc, p11rc, p11Rsn;
+  const int contextInitRc = httpServerInitJwtContext(httpServer,
+      fallback,
+      keystoreName,
+      keyId,
+      CKO_PUBLIC_KEY,
+      &initTokenRc, &p11rc, &p11Rsn);
+  if (contextInitRc != 0) {
+    zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_WARNING,
+        "Server startup problem: could not load the key %s from token %s:"
+          " rc %d, p11rc %d, p11Rsn %d\n",
+        keyId,
+        keystoreName,
+        initTokenRc, p11rc, p11Rsn);
+    return 1;
+  }
+
+  return 0;
+}
+
 int main(int argc, char **argv){
   if (argc == 1) { 
     printf("Usage: zssServer <path to zssServer.json or zluxServer.json file>\n");
@@ -923,20 +992,10 @@ int main(int argc, char **argv){
 
     zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_INFO, "ZSS server settings: address=%s, port=%d\n", address, port);
     server = makeHttpServer2(base,inetAddress,port,requiredTLSFlag,&returnCode,&reasonCode);
-    int initTokenRc, p11rc, p11Rsn;
-    int rc = httpServerInitPkcs11JwtContext(
-        server,
-        "ZOWE.ZSS.JWTKEYS", "jwtsecret", CKO_PUBLIC_KEY,
-        &initTokenRc, &p11rc, &p11Rsn);
-    if (rc != 0) {
-      zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_WARNING,
-          "server startup problem, could not load the key %s from token %s:"
-            "rc %d, p11rc %d, p11Rsn %d\n",
-          "jwtsecret", "ZOWE.ZSS.JWTKEYS",
-          initTokenRc, p11rc, p11Rsn);
-      return 8;
-    }
     if (server){
+      if (0 != initializeJwtKeystoreIfConfigured(mvdSettings, server)) {
+        return 8;
+      }
       server->defaultProductURLPrefix = PRODUCT;
       loadWebServerConfig(server, mvdSettings);
       readWebPluginDefinitions(server, slh, pluginsDir);
