@@ -218,11 +218,6 @@ int serveLoginWithSessionToken(HttpService *service, HttpResponse *response) {
   addStringHeader(response,"Transfer-Encoding","chunked");
   addStringHeader(response, "Cache-control", "no-store");
   addStringHeader(response, "Pragma", "no-cache");
-  /* HACK: the cookie header should be set inside serviceAuthNativeWithSessionToken, */
-  /* but that is currently broken: the header doesn't get sent if it is set there */
-  if (response->sessionCookie){
-    addStringHeader(response,"Set-Cookie",response->sessionCookie);
-  }
   writeHeader(response);
 
   jsonStart(p);
@@ -931,13 +926,13 @@ int main(int argc, char **argv){
     int initTokenRc, p11rc, p11Rsn;
     int rc = httpServerInitPkcs11JwtContext(
         server,
-        "ZOWE.ZSS.JWTKEYS", "KEY_RS256", CKO_PUBLIC_KEY,
+        "ZOWE.ZSS.JWTKEYS", "jwtsecret", CKO_PUBLIC_KEY,
         &initTokenRc, &p11rc, &p11Rsn);
     if (rc != 0) {
       zowelog(NULL, LOG_COMP_ID_MVD_SERVER, ZOWE_LOG_WARNING,
           "server startup problem, could not load the key %s from token %s:"
             "rc %d, p11rc %d, p11Rsn %d\n",
-          "KEY_RS256", "ZOWE.ZSS.JWTKEYS",
+          "jwtsecret", "ZOWE.ZSS.JWTKEYS",
           initTokenRc, p11rc, p11Rsn);
       return 8;
     }
